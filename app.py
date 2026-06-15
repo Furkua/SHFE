@@ -174,6 +174,90 @@ def optimize_formula(ingredients_df, allowed_ingredients, targets, goals, bar_we
     nut, _ = calculate_nutrition(best, ingredients_df, bar_weight)
     return best, nut, best_details
 
+
+
+def infer_goals_from_prompt(prompt):
+    text = prompt.lower()
+    goals = {
+        "max_protein": any(w in text for w in ["proteína", "proteina", "protein", "proteica", "proteico"]),
+        "low_sugar": any(w in text for w in ["baja en azúcar", "bajo en azúcar", "sin azúcar", "azucar", "azúcar", "low sugar"]),
+        "high_fiber": any(w in text for w in ["fibra", "saciante", "digestiva"]),
+        "low_cost": any(w in text for w in ["barata", "barato", "costo", "económica", "economica", "margen"]),
+        "functional": any(w in text for w in ["funcional", "omega", "semillas", "nutritiva", "saludable", "premium"]),
+        "low_sat": any(w in text for w in ["saturada", "saturadas", "grasa baja", "baja en grasa"]),
+    }
+    if not any(goals.values()):
+        goals.update({"max_protein": True, "low_sugar": True, "low_cost": True})
+    return goals
+
+
+def infer_targets_from_prompt(prompt, current_targets):
+    import re
+    targets = current_targets.copy()
+    text = prompt.lower().replace(",", ".")
+    patterns = {
+        "proteina_min_g": [r"(\d+(?:\.\d+)?)\s*g\s*(?:de\s*)?prote[ií]na", r"prote[ií]na\s*(?:m[ií]nima|mayor a|>=|sobre|de)?\s*(\d+(?:\.\d+)?)"],
+        "azucar_max_g": [r"(?:menos de|m[aá]ximo|max|<=)\s*(\d+(?:\.\d+)?)\s*g\s*(?:de\s*)?az[uú]car", r"az[uú]car\s*(?:m[aá]xima|max|menor a|<=)?\s*(\d+(?:\.\d+)?)"],
+        "fibra_min_g": [r"(\d+(?:\.\d+)?)\s*g\s*(?:de\s*)?fibra", r"fibra\s*(?:m[ií]nima|mayor a|>=|sobre|de)?\s*(\d+(?:\.\d+)?)"],
+        "costo_max_clp": [r"(?:menos de|m[aá]ximo|max|<=)\s*\$?\s*(\d+(?:\.\d+)?)\s*(?:clp|pesos|\$)?", r"costo\s*(?:m[aá]ximo|max|menor a|<=)?\s*\$?\s*(\d+(?:\.\d+)?)"],
+    }
+    for key, pats in patterns.items():
+        for pat in pats:
+            m = re.search(pat, text)
+            if m:
+                value = float(m.group(1))
+                # evita confundir 45 g de barra con costo si el número es muy bajo
+                if key == "costo_max_clp" and value < 50:
+                    continue
+                targets[key] = value
+                break
+    return targets
+
+
+def ingredients_from_prompt(prompt, ingredients_df):
+    text = prompt.lower()
+    names = ingredients_df["Ingrediente"].tolist()
+    selected = []
+    for name in names:
+        if name.lower() in text:
+            selected.append(name)
+    # Palabras guía por estilo
+    if any(w in text for w in ["chocolate", "brownie", "choco"]):
+        selected += [n for n in names if n in ["Chips choco", "Pasta de maní", "Almendras", "Avena", "Albúmina", "Maltitol"]]
+    if any(w in text for w in ["berry", "berries", "frutal", "cranberry", "goji"]):
+        selected += [n for n in names if n in ["Cranberry", "Goji", "Almendras", "Nueces", "Avena", "Chia", "Linaza", "Maltitol"]]
+    if any(w in text for w in ["semillas", "omega", "funcional"]):
+        selected += [n for n in names if n in ["Chia", "Linaza", "Maravilla", "Zapallo", "Almendras", "Nueces"]]
+    if any(w in text for w in ["proteica", "proteico", "proteína", "proteina"]):
+        selected += [n for n in names if n in ["Albúmina", "Clara", "Pasta de maní", "Maní", "Almendras", "Zapallo", "Avena"]]
+    if any(w in text for w in ["baja en azúcar", "sin azúcar", "azucar", "azúcar"]):
+        selected += [n for n in names if n in ["Maltitol", "Avena", "Almendras", "Chia", "Linaza", "Albúmina", "Clara"]]
+    selected = list(dict.fromkeys(selected))
+    return selected if len(selected) >= 5 else names
+
+
+def generate_formula_from_chat(prompt, ingredients_df, current_targets, bar_weight=45):
+    goals = infer_goals_from_prompt(prompt)
+    targets = infer_targets_from_prompt(prompt, current_targets)
+    allowed = ingredients_from_prompt(prompt, ingredients_df)
+    formula, nut, details = optimize_formula(ingredients_df, allowed, targets, goals, bar_weight, iterations=3500)
+    if nut is None:
+        return None, None, goals, targets, allowed, ["No se pudo generar una fórmula con los ingredientes disponibles."]
+    explanation = []
+    if goals.get("max_protein"):
+        explanation.append("prioricé fuentes proteicas como albúmina/clara, frutos secos y avena")
+    if goals.get("low_sugar"):
+        explanation.append("penalicé ingredientes con más azúcar y favorecí maltitol/semillas")
+    if goals.get("high_fiber"):
+        explanation.append("subí el peso relativo de ingredientes con fibra como chía, linaza y avena")
+    if goals.get("low_cost"):
+        explanation.append("incluí una restricción de costo máximo estimado")
+    if goals.get("functional"):
+        explanation.append("favorecí ingredientes con mayor score funcional demo")
+    if not explanation:
+        explanation.append("usé objetivos generales de proteína, azúcar y costo")
+    return formula, nut, goals, targets, allowed, explanation
+
 # -----------------------------
 # Session state
 # -----------------------------
@@ -207,7 +291,7 @@ with st.sidebar:
         st.session_state.formula = build_formula_df(weights_to_pct(formula_berry_weights))
 
 # Main tabs
-tab_ing, tab_formula, tab_opt, tab_score = st.tabs(["1. Ingredientes", "2. Fórmula / Tabla", "3. Optimización", "4. Scoring"])
+tab_ing, tab_formula, tab_opt, tab_ai, tab_score = st.tabs(["1. Ingredientes", "2. Fórmula / Tabla", "3. Optimización", "4. IA generativa", "5. Scoring"])
 
 with tab_ing:
     st.subheader("Módulo de ingredientes")
@@ -305,6 +389,54 @@ with tab_opt:
             st.dataframe(best_formula, use_container_width=True, hide_index=True)
             st.write("Resultado estimado:")
             st.json({k: round(v, 2) for k, v in best_nut.items()})
+
+with tab_ai:
+    st.subheader("IA generativa simple de formulaciones")
+    st.write("Describe la barra que quieres crear. Esta versión usa reglas + optimización, no envía datos a APIs externas.")
+
+    default_prompt = "Quiero una barra tipo brownie, alta en proteína, baja en azúcar, con buena fibra y costo menor a 350 pesos."
+    user_prompt = st.text_area("Prompt de formulación", value=default_prompt, height=110)
+
+    c_ai1, c_ai2, c_ai3, c_ai4, c_ai5 = st.columns(5)
+    ai_targets = {
+        "proteina_min_g": c_ai1.number_input("Proteína mín. IA (g)", 0.0, 30.0, 8.0, 0.5, key="ai_prot"),
+        "azucar_max_g": c_ai2.number_input("Azúcar máx. IA (g)", 0.0, 30.0, 6.0, 0.5, key="ai_sugar"),
+        "fibra_min_g": c_ai3.number_input("Fibra mín. IA (g)", 0.0, 20.0, 4.0, 0.5, key="ai_fiber"),
+        "costo_max_clp": c_ai4.number_input("Costo máx. IA ($)", 0.0, 2000.0, 350.0, 10.0, key="ai_cost"),
+        "sat_max_g": c_ai5.number_input("Sat. máx. IA (g)", 0.0, 20.0, 4.0, 0.5, key="ai_sat"),
+    }
+
+    if st.button("Generar con IA simple"):
+        ai_formula, ai_nut, ai_goals, ai_targets_used, ai_allowed, ai_explanation = generate_formula_from_chat(
+            user_prompt, st.session_state.ingredients, ai_targets, bar_weight
+        )
+        if ai_nut is None:
+            st.error("No pude generar una fórmula con esta solicitud.")
+        else:
+            st.session_state.formula = ai_formula
+            score, score_details = score_formula(ai_nut, ai_targets_used, ai_goals)
+            st.success("Fórmula generada y cargada en la pestaña Fórmula / Tabla.")
+            st.markdown("#### Interpretación de la solicitud")
+            st.write("Logros detectados:")
+            st.json(ai_goals)
+            st.write("Criterios usados:")
+            st.json(ai_targets_used)
+            st.write("Decisión del motor:")
+            for item in ai_explanation:
+                st.write("- " + item)
+
+            st.markdown("#### Fórmula sugerida")
+            st.dataframe(ai_formula, use_container_width=True, hide_index=True)
+
+            st.markdown("#### Resultado estimado")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Proteína", f"{ai_nut['proteina_g']:.1f} g")
+            m2.metric("Azúcar", f"{ai_nut['azucar_g']:.1f} g")
+            m3.metric("Fibra", f"{ai_nut['fibra_g']:.1f} g")
+            m4.metric("Costo", f"${ai_nut['costo_clp']:.0f}")
+            m5.metric("Score", f"{score}/100")
+
+    st.info("Esta IA es local y demostrativa: interpreta texto con reglas simples y genera fórmulas usando el optimizador. No es todavía un LLM conectado ni un modelo entrenado con prototipos reales.")
 
 with tab_score:
     st.subheader("Scoring system simple")

@@ -291,7 +291,7 @@ with st.sidebar:
         st.session_state.formula = build_formula_df(weights_to_pct(formula_berry_weights))
 
 # Main tabs
-tab_ing, tab_formula, tab_opt, tab_ai, tab_score = st.tabs(["Ingredientes", "Fórmula / Tabla", "Optimización", "IA generativa", "Scoring"])
+tab_ing, tab_formula, tab_opt, tab_ai, tab_score = st.tabs(["Ingredientes", "Fórmula / Tabla", "Optimización", "SH Neural Engine", "Scoring"])
 
 with tab_ing:
     st.subheader("Módulo de ingredientes")

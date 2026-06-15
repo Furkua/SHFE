@@ -291,7 +291,7 @@ with st.sidebar:
         st.session_state.formula = build_formula_df(weights_to_pct(formula_berry_weights))
 
 # Main tabs
-tab_ing, tab_formula, tab_opt, tab_ai, tab_score = st.tabs(["1. Ingredientes", "2. Fórmula / Tabla", "3. Optimización", "4. IA generativa", "5. Scoring"])
+tab_ing, tab_formula, tab_opt, tab_ai, tab_score = st.tabs(["Ingredientes", "Fórmula / Tabla", "Optimización", "IA generativa", "Scoring"])
 
 with tab_ing:
     st.subheader("Módulo de ingredientes")
@@ -391,7 +391,7 @@ with tab_opt:
             st.json({k: round(v, 2) for k, v in best_nut.items()})
 
 with tab_ai:
-    st.subheader("IA generativa simple de formulaciones")
+    st.subheader("Super Human Neural Engine")
     st.write("Describe la barra que quieres crear. Esta versión usa reglas + optimización, no envía datos a APIs externas.")
 
     default_prompt = "Quiero una barra tipo brownie, alta en proteína, baja en azúcar, con buena fibra y costo menor a 350 pesos."
